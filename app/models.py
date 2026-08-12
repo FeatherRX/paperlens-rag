@@ -1,4 +1,12 @@
-from pydantic import BaseModel
+import re
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
+
+
+OPENALEX_WORK_ID_PATTERN = re.compile(
+    r"^(?:https://openalex\.org/)?(W[1-9]\d*)$"
+)
 
 
 class OpenAccessInfo(BaseModel):
@@ -25,3 +33,47 @@ class PaperSearchResponse(BaseModel):
     query: str
     count: int
     papers: list[Paper]
+
+
+SourceStatus = Literal[
+    "fulltext_candidate",
+    "abstract_only",
+    "unavailable",
+]
+
+
+class OpenAlexContent(BaseModel):
+    pdf_available: bool
+    grobid_xml_available: bool
+    content_url: str | None = None
+
+
+class PreparedPaper(Paper):
+    source_status: SourceStatus
+    fulltext_url: str | None = None
+    fulltext_license: str | None = None
+    openalex_content: OpenAlexContent
+
+
+class PaperPrepareRequest(BaseModel):
+    paper_ids: list[str] = Field(min_length=3, max_length=5)
+
+    @field_validator("paper_ids")
+    @classmethod
+    def normalize_paper_ids(cls, paper_ids: list[str]) -> list[str]:
+        normalized_ids: list[str] = []
+        for paper_id in paper_ids:
+            match = OPENALEX_WORK_ID_PATTERN.fullmatch(paper_id.strip())
+            if match is None:
+                raise ValueError("paper_ids must contain valid OpenAlex work IDs")
+            normalized_ids.append(match.group(1))
+
+        if len(set(normalized_ids)) != len(normalized_ids):
+            raise ValueError("paper_ids must not contain duplicates")
+
+        return normalized_ids
+
+
+class PaperPrepareResponse(BaseModel):
+    count: int
+    papers: list[PreparedPaper]

@@ -76,10 +76,66 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/papers/search?query=retrieval%20au
 
 OpenAlex 超时返回 HTTP 504；OpenAlex 请求失败或响应无效返回 HTTP 502。
 
+## 准备选中的论文来源
+
+论文选择必须由用户完成：
+
+1. 用户先调用 `GET /papers/search` 检索相关论文。
+2. 用户在搜索结果中自行选择 3～5 篇论文。
+3. 前端把选中的 OpenAlex ID 发送给 `POST /papers/prepare`。
+
+系统不会自动替用户选择论文。短格式 ID 和完整 OpenAlex URL 可以混合使用，但规范化后不得重复：
+
+```powershell
+$body = @{
+    paper_ids = @(
+        "W2741809807"
+        "https://openalex.org/W4389984066"
+        "W3038568908"
+    )
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://127.0.0.1:8000/papers/prepare" `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+响应包含成功准备的论文数量、现有论文元数据及以下来源准备信息：
+
+```json
+{
+  "count": 3,
+  "papers": [
+    {
+      "source_status": "fulltext_candidate",
+      "fulltext_url": "https://example.org/paper.pdf",
+      "fulltext_license": "cc-by",
+      "openalex_content": {
+        "pdf_available": true,
+        "grobid_xml_available": true,
+        "content_url": "https://content.openalex.org/example.xml"
+      }
+    }
+  ]
+}
+```
+
+`source_status` 只允许：
+
+- `fulltext_candidate`：`best_oa_location` 明确为开放获取且提供非空 PDF URL；只表示开放全文候选，不表示已经完成版权复核或全文分析。
+- `abstract_only`：没有合格的开放 PDF 候选，但存在原始 Abstract。
+- `unavailable`：开放 PDF 候选和 Abstract 均不存在。
+
+`has_content.pdf` 和 `has_content.grobid_xml` 只表示 OpenAlex 缓存格式的可用性，不能证明全文具有开放授权，也不会令论文自动成为 `fulltext_candidate`。当前接口不会下载 PDF、XML 或其他全文，不会消耗 OpenAlex 内容下载额度，也不会解析或总结全文。
+
+单篇论文不存在返回 HTTP 404；OpenAlex 超时返回 HTTP 504；其他 OpenAlex 请求或响应错误返回 HTTP 502。
+
 ## 运行测试
 
 ```powershell
 python -m pytest -q
 ```
 
-搜索接口测试使用 mock HTTP transport，不依赖真实 OpenAlex 网络。
+搜索和准备接口测试使用 mock HTTP transport，不依赖真实 OpenAlex 网络。

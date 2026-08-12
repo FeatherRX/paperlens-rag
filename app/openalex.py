@@ -6,7 +6,7 @@ from typing import Any
 import httpx2
 from dotenv import load_dotenv
 
-from app.models import OpenAccessInfo, Paper
+from app.models import OpenAccessInfo, OpenAlexContent, Paper, PreparedPaper
 
 
 OPENALEX_BASE_URL = "https://api.openalex.org"
@@ -17,6 +17,9 @@ OPENALEX_WORK_FIELDS = (
     "abstract_inverted_index,doi,primary_location,best_oa_location,"
     "open_access,cited_by_count"
 )
+OPENALEX_PREPARE_WORK_FIELDS = (
+    f"{OPENALEX_WORK_FIELDS},has_content,content_urls"
+)
 
 
 class OpenAlexError(RuntimeError):
@@ -25,6 +28,14 @@ class OpenAlexError(RuntimeError):
 
 class OpenAlexTimeoutError(OpenAlexError):
     """Raised when OpenAlex does not respond before the configured timeout."""
+
+
+class OpenAlexNotFoundError(OpenAlexError):
+    """Raised when an OpenAlex work ID does not exist."""
+
+    def __init__(self, paper_id: str) -> None:
+        super().__init__("OpenAlex paper not found")
+        self.paper_id = paper_id
 
 
 def get_openalex_api_key(dotenv_path: str | os.PathLike[str] | None = None) -> str | None:
@@ -65,7 +76,7 @@ def _unique_display_names(items: list[object]) -> list[str]:
     return names
 
 
-def _paper_from_work(work: dict[str, Any]) -> Paper:
+def paper_from_work(work: dict[str, Any]) -> Paper:
     authorships = work.get("authorships")
     if not isinstance(authorships, list):
         authorships = []
@@ -118,6 +129,60 @@ def _paper_from_work(work: dict[str, Any]) -> Paper:
     )
 
 
+def _nonempty_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def prepared_paper_from_work(work: dict[str, Any]) -> PreparedPaper:
+    paper = paper_from_work(work)
+
+    best_oa_location = work.get("best_oa_location")
+    if not isinstance(best_oa_location, dict):
+        best_oa_location = {}
+
+    candidate_url = _nonempty_string(best_oa_location.get("pdf_url"))
+    is_fulltext_candidate = (
+        best_oa_location.get("is_oa") is True and candidate_url is not None
+    )
+
+    has_content = work.get("has_content")
+    if not isinstance(has_content, dict):
+        has_content = {}
+
+    content_url = _nonempty_string(work.get("content_url"))
+    content_urls = work.get("content_urls")
+    if content_url is None and isinstance(content_urls, dict):
+        content_url = _nonempty_string(content_urls.get("grobid_xml"))
+        if content_url is None:
+            content_url = _nonempty_string(content_urls.get("pdf"))
+
+    if is_fulltext_candidate:
+        source_status = "fulltext_candidate"
+    elif paper.abstract:
+        source_status = "abstract_only"
+    else:
+        source_status = "unavailable"
+
+    return PreparedPaper(
+        **paper.model_dump(),
+        source_status=source_status,
+        fulltext_url=candidate_url if is_fulltext_candidate else None,
+        fulltext_license=(
+            _nonempty_string(best_oa_location.get("license"))
+            if is_fulltext_candidate
+            else None
+        ),
+        openalex_content=OpenAlexContent(
+            pdf_available=has_content.get("pdf") is True,
+            grobid_xml_available=has_content.get("grobid_xml") is True,
+            content_url=content_url,
+        ),
+    )
+
+
 class OpenAlexClient:
     def __init__(
         self,
@@ -127,33 +192,68 @@ class OpenAlexClient:
         self._http_client = http_client
         self._api_key = api_key
 
-    async def search_papers(self, query: str, limit: int) -> list[Paper]:
-        params: dict[str, str | int] = {
-            "search": query,
-            "per_page": limit,
-            "select": OPENALEX_WORK_FIELDS,
-        }
+    async def _get_json(
+        self,
+        path: str,
+        params: dict[str, str | int],
+        not_found_paper_id: str | None = None,
+    ) -> Any:
+        request_params = dict(params)
         if self._api_key:
-            params["api_key"] = self._api_key
+            request_params["api_key"] = self._api_key
 
         try:
-            response = await self._http_client.get("/works", params=params)
+            response = await self._http_client.get(path, params=request_params)
+            if response.status_code == 404 and not_found_paper_id is not None:
+                raise OpenAlexNotFoundError(not_found_paper_id)
             response.raise_for_status()
+        except OpenAlexNotFoundError:
+            raise
         except httpx2.TimeoutException as exc:
             raise OpenAlexTimeoutError("OpenAlex request timed out") from exc
         except httpx2.HTTPError as exc:
             raise OpenAlexError("OpenAlex request failed") from exc
 
         try:
-            payload = response.json()
+            return response.json()
         except ValueError as exc:
             raise OpenAlexError("OpenAlex returned invalid JSON") from exc
+
+    async def search_papers(self, query: str, limit: int) -> list[Paper]:
+        params: dict[str, str | int] = {
+            "search": query,
+            "per_page": limit,
+            "select": OPENALEX_WORK_FIELDS,
+        }
+        payload = await self._get_json("/works", params)
 
         results = payload.get("results") if isinstance(payload, dict) else None
         if not isinstance(results, list):
             raise OpenAlexError("OpenAlex response did not contain a results list")
 
-        return [_paper_from_work(work) for work in results if isinstance(work, dict)]
+        try:
+            return [
+                paper_from_work(work) for work in results if isinstance(work, dict)
+            ]
+        except (TypeError, ValueError) as exc:
+            raise OpenAlexError("OpenAlex returned invalid work data") from exc
+
+    async def prepare_papers(self, paper_ids: list[str]) -> list[PreparedPaper]:
+        papers: list[PreparedPaper] = []
+        for paper_id in paper_ids:
+            payload = await self._get_json(
+                f"/works/{paper_id}",
+                {"select": OPENALEX_PREPARE_WORK_FIELDS},
+                not_found_paper_id=paper_id,
+            )
+            if not isinstance(payload, dict):
+                raise OpenAlexError("OpenAlex returned invalid work data")
+            try:
+                papers.append(prepared_paper_from_work(payload))
+            except (TypeError, ValueError) as exc:
+                raise OpenAlexError("OpenAlex returned invalid work data") from exc
+
+        return papers
 
 
 async def get_openalex_client() -> AsyncIterator[OpenAlexClient]:

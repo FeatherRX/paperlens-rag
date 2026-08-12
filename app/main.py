@@ -2,8 +2,13 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 
-from app.models import PaperSearchResponse
-from app.openalex import OpenAlexClient, OpenAlexError, OpenAlexTimeoutError
+from app.models import PaperPrepareRequest, PaperPrepareResponse, PaperSearchResponse
+from app.openalex import (
+    OpenAlexClient,
+    OpenAlexError,
+    OpenAlexNotFoundError,
+    OpenAlexTimeoutError,
+)
 from app.openalex import get_openalex_client
 
 
@@ -46,6 +51,38 @@ async def search_papers(
 
     return PaperSearchResponse(
         query=normalized_query,
+        count=len(papers),
+        papers=papers,
+    )
+
+
+@app.post("/papers/prepare", response_model=PaperPrepareResponse)
+async def prepare_papers(
+    request: PaperPrepareRequest,
+    openalex_client: OpenAlexClient = Depends(get_openalex_client),
+) -> PaperPrepareResponse:
+    try:
+        papers = await openalex_client.prepare_papers(request.paper_ids)
+    except OpenAlexNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "paper_not_found",
+                "paper_id": exc.paper_id,
+            },
+        ) from exc
+    except OpenAlexTimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="OpenAlex request timed out",
+        ) from exc
+    except OpenAlexError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="OpenAlex request failed",
+        ) from exc
+
+    return PaperPrepareResponse(
         count=len(papers),
         papers=papers,
     )
