@@ -1,0 +1,126 @@
+.page {
+  width: min(1180px, calc(100% - 2rem));
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--color-text-strong);
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.brand span {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.55rem;
+  color: white;
+  background: var(--color-primary);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+}
+
+.brand:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 4px;
+}
+
+.header > p {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: 0.82rem;
+}
+
+.hero {
+  display: grid;
+  max-width: 850px;
+  margin: 0 auto;
+  padding: clamp(3.5rem, 8vw, 6.5rem) 0 3rem;
+  text-align: center;
+}
+
+.kicker {
+  margin: 0;
+  color: var(--color-primary);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hero h1 {
+  margin: 0.8rem auto 1rem;
+  color: var(--color-text-strong);
+  font-size: clamp(2.25rem, 6vw, 4.5rem);
+  line-height: 1.07;
+  letter-spacing: -0.045em;
+}
+
+.intro {
+  max-width: 680px;
+  margin: 0 auto 2rem;
+  color: var(--color-text-muted);
+  font-size: clamp(1rem, 2vw, 1.12rem);
+  line-height: 1.7;
+}
+
+.workspace {
+  display: grid;
+  gap: 1rem;
+  padding-bottom: 3rem;
+}
+
+.resultsHeading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.resultsHeading h2 {
+  margin: 0.3rem 0 0;
+  color: var(--color-text-strong);
+  font-size: clamp(1.25rem, 3vw, 1.75rem);
+}
+
+.resultsHeading > span {
+  color: var(--color-text-subtle);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.footer {
+  padding: 1.5rem 0 2.5rem;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-subtle);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.footer p {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .header > p {
+    display: none;
+  }
+
+  .resultsHeading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

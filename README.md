@@ -1,14 +1,17 @@
 # PaperLens RAG
 
-PaperLens RAG 是一个以“输入研究主题”为入口的论文研究助手后端。当前 MVP 通过 OpenAlex 检索相关论文，并返回统一的论文元数据，为后续的论文选择、合法开放全文处理、检索和带来源回答奠定基础。
+PaperLens RAG 是一个以“输入研究主题”为入口的论文研究助手。当前 MVP 由 FastAPI 后端与 React 前端组成：后端通过 OpenAlex 检索论文并准备统一来源状态，前端支持用户搜索并自行选择 3～5 篇论文。
 
-当前阶段不实现 PDF 上传、LLM、向量数据库、全文解析、前端或 Docker。OpenAlex 返回的 Abstract 是论文原始摘要元数据，不是系统生成的全文总结。
+当前阶段不实现 PDF 上传、LLM、向量数据库、全文解析或 Docker。OpenAlex 返回的 Abstract 是论文原始摘要元数据，不是系统生成的全文总结。
+
+前后端分离开发、同仓库维护：FastAPI 位于仓库根目录，唯一前端工程位于 `frontend/`。前端采用 React + TypeScript + Vite、React Router、TanStack Query、CSS Modules，并且只调用 FastAPI HTTP/JSON API，绝不直接访问 OpenAlex 或读取 `OPENALEX_API_KEY`。
 
 完整且冻结的产品方向见 [`PROJECT_SPEC.md`](PROJECT_SPEC.md)。
 
 ## 环境要求
 
 - Python 3.13
+- Node.js 24 与 npm 11（前端开发）
 - OpenAlex API key（真实检索时使用，可在 OpenAlex 设置页免费获取）
 
 ## 创建并激活虚拟环境
@@ -58,6 +61,20 @@ python -m uvicorn app.main:app --reload
 
 - 健康检查：`http://127.0.0.1:8000/health`
 - API 文档：`http://127.0.0.1:8000/docs`
+
+## 启动前端
+
+前端位于 `frontend/`。先安装锁定文件记录的依赖，再启动 Vite 开发服务器：
+
+```powershell
+Set-Location frontend
+D:\Node\npm.cmd install
+D:\Node\npm.cmd run dev
+```
+
+默认访问 `http://127.0.0.1:5173/`。开发服务器把所有 `/api` 请求代理到本地 FastAPI（默认 `http://127.0.0.1:8000`），并在转发时移除 `/api` 前缀。因此需要同时运行后端与前端；前端不会直接访问 OpenAlex，也不需要任何 API Key。
+
+页面流程为：输入研究主题并搜索，用户自行勾选 3～5 篇论文，然后点击“准备分析”。准备结果当前只说明开放全文候选、仅原始摘要或暂无可用语料；不会下载、解析或总结全文。
 
 ## 搜索论文
 
@@ -139,3 +156,13 @@ python -m pytest -q
 ```
 
 搜索和准备接口测试使用 mock HTTP transport，不依赖真实 OpenAlex 网络。
+
+前端测试、代码检查、构建与格式检查：
+
+```powershell
+Set-Location frontend
+D:\Node\npm.cmd test -- --run
+D:\Node\npm.cmd run lint
+D:\Node\npm.cmd run build
+D:\Node\npm.cmd run format:check
+```
