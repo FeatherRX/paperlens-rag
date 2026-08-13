@@ -26,6 +26,17 @@ PaperLens 允许用户输入研究主题，系统自动检索高相关论文，�
 - 只获取摘要以及合法、明确开放获取的全文。
 - 保留 FastAPI 后端和自动化测试。
 
+## 前端架构（冻结）
+
+- 前端固定采用 React、TypeScript 和 Vite。
+- 前后端分离开发，但在同一个 Git 仓库维护；`frontend/` 是唯一前端目录。
+- 使用 React Router 管理前端路由，使用 TanStack Query 管理 API 服务器状态。
+- 使用 CSS Modules 与全局 CSS 设计变量构建界面。
+- 前端只通过 FastAPI HTTP/JSON API 访问数据，不得直接调用 OpenAlex，也不得读取、传递或打包 `OPENALEX_API_KEY`。
+- 用户必须从搜索结果中自行选择 3～5 篇论文，系统和前端不得自动替用户选择。
+- PDF 上传不是当前产品入口。
+- 前端展示的 Abstract 必须明确标注为论文原始摘要，不得表示为系统生成的全文总结。
+
 ## 明确排除项
 
 - 本阶段不实现 PDF 上传；PDF 上传仅是未来增强能力，不能作为当前入口。

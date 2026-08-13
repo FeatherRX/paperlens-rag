@@ -11,3 +11,7 @@
 - 不得获取付费或无授权论文全文。
 - 如需求可能改变产品方向、技术边界或合法内容获取边界，必须先获得用户明确确认。
 - 保留并维护 `GET /health` 及其测试。
+- 前端技术栈固定为 React + TypeScript + Vite，且只能位于根目录的 `frontend/`。
+- 前端必须通过 FastAPI API 访问数据，不得直接调用 OpenAlex，不得读取或打包 `OPENALEX_API_KEY`。
+- 前端论文选择必须由用户明确操作，数量限制为 3～5 篇，不得自动选择。
+- 前端不得使用 Jinja2、Vue、Next.js、Redux、Zustand 或大型 UI 组件库。
