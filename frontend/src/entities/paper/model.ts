@@ -75,3 +75,25 @@ export interface PaperIngestResponse {
   count: number
   papers: IngestedPaperSummary[]
 }
+
+export interface RagAnswerRequest {
+  query: string
+  paper_ids: string[]
+  top_k?: number
+}
+
+export interface RagCitation {
+  citation_number: number
+  paper_id: string
+  paper_title: string | null
+  chunk_index: number
+  page_numbers: number[]
+  section_title: string | null
+  evidence_excerpt: string
+  retrieval_score: number
+}
+
+export interface RagAnswerResponse {
+  answer: string
+  citations: RagCitation[]
+}
