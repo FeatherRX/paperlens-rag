@@ -1,6 +1,8 @@
 defusedxml==0.7.1
 fastapi==0.141.1
+fastembed==0.8.0
 httpx2==2.7.0
+onnxruntime==1.28.0
 pypdf==6.14.2
 python-dotenv==1.2.2
 uvicorn==0.52.1
