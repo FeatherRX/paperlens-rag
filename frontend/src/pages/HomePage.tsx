@@ -1,6 +1,10 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
-import type { Paper } from '../entities/paper/model'
+import type {
+  IngestStatus,
+  Paper,
+  PaperIngestResponse,
+} from '../entities/paper/model'
 import { PaperResults } from '../features/paper-search/PaperResults'
 import { SearchForm } from '../features/paper-search/SearchForm'
 import { IngestionResults } from '../features/paper-selection/IngestionResults'
@@ -10,6 +14,31 @@ import { RagQuestionPanel } from '../features/rag-qa/RagQuestionPanel'
 import { ingestPapers, preparePapers, searchPapers } from '../shared/api/papers'
 import { Feedback } from '../shared/ui/Feedback'
 import styles from './HomePage.module.css'
+
+const RAG_CORPUS_STATUSES = new Set<IngestStatus>([
+  'ingested',
+  'cached',
+  'abstract_fallback',
+])
+
+function normalizedPaperId(paperId: string) {
+  return paperId.replace(/^https:\/\/openalex\.org\//, '')
+}
+
+function ragCorpusPaperIds(
+  selectedPaperIds: string[],
+  response: PaperIngestResponse,
+) {
+  const eligiblePaperIds = new Set(
+    response.papers
+      .filter((paper) => RAG_CORPUS_STATUSES.has(paper.status))
+      .map((paper) => paper.paper_id),
+  )
+
+  return selectedPaperIds.filter((paperId) =>
+    eligiblePaperIds.has(normalizedPaperId(paperId)),
+  )
+}
 
 export function HomePage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -118,7 +147,12 @@ export function HomePage() {
           {ingestion.isSuccess && (
             <>
               <IngestionResults data={ingestion.data} />
-              <RagQuestionPanel paperIds={[...ingestion.variables.paper_ids]} />
+              <RagQuestionPanel
+                paperIds={ragCorpusPaperIds(
+                  ingestion.variables.paper_ids,
+                  ingestion.data,
+                )}
+              />
             </>
           )}
         </section>

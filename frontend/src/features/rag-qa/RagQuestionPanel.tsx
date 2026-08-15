@@ -9,14 +9,17 @@ interface RagQuestionPanelProps {
   paperIds: string[]
 }
 
+const MINIMUM_RAG_PAPERS = 3
+
 export function RagQuestionPanel({ paperIds }: RagQuestionPanelProps) {
   const [query, setQuery] = useState('')
   const answer = useMutation({ mutationFn: answerRag })
   const normalizedQuery = query.trim()
+  const canAsk = paperIds.length >= MINIMUM_RAG_PAPERS
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!normalizedQuery || answer.isPending) return
+    if (!canAsk || !normalizedQuery || answer.isPending) return
     answer.mutate({
       query: normalizedQuery,
       paper_ids: [...paperIds],
@@ -30,8 +33,15 @@ export function RagQuestionPanel({ paperIds }: RagQuestionPanelProps) {
           <p>证据问答</p>
           <h2 id="rag-question-title">基于已摄取论文提问</h2>
         </div>
-        <span>{paperIds.length} 篇已选语料</span>
+        <span>{paperIds.length} 篇可用于问答</span>
       </div>
+
+      {!canAsk && (
+        <Feedback>
+          当前只有 {paperIds.length} 篇论文形成了可检索本地文档；至少需要 3
+          篇才能发起问答。请调整选择并重新准备、摄取。
+        </Feedback>
+      )}
 
       <form className={styles.form} onSubmit={handleSubmit}>
         <label htmlFor="rag-query">研究问题</label>
@@ -41,10 +51,14 @@ export function RagQuestionPanel({ paperIds }: RagQuestionPanelProps) {
           onChange={(event) => setQuery(event.target.value)}
           placeholder="例如：主动式 RAG 应在什么情况下检索外部信息？"
           rows={3}
+          disabled={!canAsk}
         />
         <div className={styles.formFooter}>
-          <p>回答只使用当前这 {paperIds.length} 篇已摄取论文的检索证据。</p>
-          <button type="submit" disabled={!normalizedQuery || answer.isPending}>
+          <p>回答只使用当前这 {paperIds.length} 篇可检索论文的证据。</p>
+          <button
+            type="submit"
+            disabled={!canAsk || !normalizedQuery || answer.isPending}
+          >
             {answer.isPending ? '生成回答中…' : '提问'}
           </button>
         </div>
