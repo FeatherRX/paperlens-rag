@@ -3,9 +3,10 @@ import { useState } from 'react'
 import type { Paper } from '../entities/paper/model'
 import { PaperResults } from '../features/paper-search/PaperResults'
 import { SearchForm } from '../features/paper-search/SearchForm'
+import { IngestionResults } from '../features/paper-selection/IngestionResults'
 import { PreparationResults } from '../features/paper-selection/PreparationResults'
 import { SelectionToolbar } from '../features/paper-selection/SelectionToolbar'
-import { preparePapers, searchPapers } from '../shared/api/papers'
+import { ingestPapers, preparePapers, searchPapers } from '../shared/api/papers'
 import { Feedback } from '../shared/ui/Feedback'
 import styles from './HomePage.module.css'
 
@@ -13,10 +14,12 @@ export function HomePage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const search = useMutation({ mutationFn: searchPapers })
   const preparation = useMutation({ mutationFn: preparePapers })
+  const ingestion = useMutation({ mutationFn: ingestPapers })
 
   function handleSearch(query: string) {
     setSelectedIds([])
     preparation.reset()
+    ingestion.reset()
     search.mutate(query)
   }
 
@@ -31,6 +34,12 @@ export function HomePage() {
       return current.filter((id) => id !== paperId)
     })
     preparation.reset()
+    ingestion.reset()
+  }
+
+  function handlePrepare() {
+    ingestion.reset()
+    preparation.mutate(selectedIds)
   }
 
   return (
@@ -78,7 +87,7 @@ export function HomePage() {
               <SelectionToolbar
                 selectedCount={selectedIds.length}
                 isPreparing={preparation.isPending}
-                onPrepare={() => preparation.mutate(selectedIds)}
+                onPrepare={handlePrepare}
               />
               {preparation.isError && (
                 <Feedback tone="error">
@@ -94,8 +103,20 @@ export function HomePage() {
           )}
 
           {preparation.isSuccess && (
-            <PreparationResults data={preparation.data} />
+            <PreparationResults
+              data={preparation.data}
+              isIngesting={ingestion.isPending}
+              onIngest={() =>
+                ingestion.mutate({ paper_ids: [...selectedIds] })
+              }
+            />
           )}
+          {ingestion.isError && (
+            <Feedback tone="error">
+              语料摄取请求失败：{ingestion.error.message}
+            </Feedback>
+          )}
+          {ingestion.isSuccess && <IngestionResults data={ingestion.data} />}
         </section>
       </main>
 
