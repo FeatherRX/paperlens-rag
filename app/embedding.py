@@ -46,6 +46,8 @@ class EmbeddingEncoder(Protocol):
         batch_size: int,
     ) -> Iterable[object]: ...
 
+    def query_embed(self, query: str) -> Iterable[object]: ...
+
 
 class EmbeddingError(RuntimeError):
     """Base error for local embedding generation."""
@@ -112,6 +114,27 @@ class EmbeddingService:
             )
             for chunk, embedding in zip(chunks, vectors, strict=True)
         ]
+
+    def embed_query(self, query: str) -> list[float]:
+        normalized_query = query.strip()
+        if not normalized_query:
+            raise ValueError("query must not be empty")
+
+        encoder = self._get_encoder()
+        try:
+            encoded = encoder.query_embed(normalized_query)
+            return _normalized_vectors(
+                encoded,
+                expected_count=1,
+                expected_dimension=self.config.expected_dimension,
+            )[0]
+        except EmbeddingError:
+            raise
+        except Exception as exc:
+            raise EmbeddingEncodingError(
+                f"Embedding model '{self.config.model_name}' failed to encode "
+                "the query"
+            ) from exc
 
     def _get_encoder(self) -> EmbeddingEncoder:
         if self._encoder is not None:

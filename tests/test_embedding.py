@@ -21,11 +21,14 @@ class MockEncoder:
         self,
         vectors: object,
         *,
+        query_vectors: object | None = None,
         error: Exception | None = None,
     ) -> None:
         self.vectors = vectors
+        self.query_vectors = vectors if query_vectors is None else query_vectors
         self.error = error
         self.calls: list[dict[str, object]] = []
+        self.query_calls: list[str] = []
 
     def embed(
         self,
@@ -44,6 +47,16 @@ class MockEncoder:
             if self.error is not None:
                 raise self.error
             yield from self.vectors
+
+        return generate()
+
+    def query_embed(self, query: str) -> object:
+        self.query_calls.append(query)
+
+        def generate() -> object:
+            if self.error is not None:
+                raise self.error
+            yield from self.query_vectors
 
         return generate()
 
@@ -119,6 +132,39 @@ def test_all_embeddings_are_unit_normalized() -> None:
         for result in results
     ]
     assert norms == pytest.approx([1.0, 1.0])
+
+
+def test_embed_query_uses_query_encoder_and_normalizes() -> None:
+    encoder = MockEncoder([], query_vectors=[[3, 4, 0]])
+
+    result = _service(encoder).embed_query("  retrieval augmented generation  ")
+
+    assert encoder.query_calls == ["retrieval augmented generation"]
+    assert result == pytest.approx([0.6, 0.8, 0.0])
+
+
+def test_empty_query_does_not_load_or_call_encoder() -> None:
+    load_calls: list[str] = []
+
+    def loader(model_name: str) -> MockEncoder:
+        load_calls.append(model_name)
+        return MockEncoder([])
+
+    service = EmbeddingService(encoder_loader=loader)
+
+    with pytest.raises(ValueError, match="query must not be empty"):
+        service.embed_query("  ")
+    assert load_calls == []
+
+
+def test_query_encoder_failure_has_clear_error() -> None:
+    encoder = MockEncoder([], error=RuntimeError("encoder unavailable"))
+
+    with pytest.raises(
+        EmbeddingEncodingError,
+        match="failed to encode the query",
+    ):
+        _service(encoder).embed_query("query")
 
 
 def test_empty_input_does_not_load_or_call_encoder() -> None:
