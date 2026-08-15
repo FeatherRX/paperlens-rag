@@ -7,3 +7,4 @@ __pycache__/
 !.env.example
 data/uploads/
 data/qdrant/
+data/ingested/

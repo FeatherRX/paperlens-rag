@@ -2,7 +2,14 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 
-from app.models import PaperPrepareRequest, PaperPrepareResponse, PaperSearchResponse
+from app.ingestion import PaperIngestionService
+from app.models import (
+    PaperIngestRequest,
+    PaperIngestResponse,
+    PaperPrepareRequest,
+    PaperPrepareResponse,
+    PaperSearchResponse,
+)
 from app.openalex import (
     OpenAlexClient,
     OpenAlexError,
@@ -13,6 +20,12 @@ from app.openalex import get_openalex_client
 
 
 app = FastAPI(title="PaperLens RAG")
+
+
+def get_ingestion_service(
+    openalex_client: Annotated[OpenAlexClient, Depends(get_openalex_client)],
+) -> PaperIngestionService:
+    return PaperIngestionService(openalex_client)
 
 
 @app.get("/health")
@@ -86,3 +99,14 @@ async def prepare_papers(
         count=len(papers),
         papers=papers,
     )
+
+
+@app.post("/papers/ingest", response_model=PaperIngestResponse)
+async def ingest_papers(
+    request: PaperIngestRequest,
+    ingestion_service: Annotated[
+        PaperIngestionService, Depends(get_ingestion_service)
+    ],
+) -> PaperIngestResponse:
+    papers = await ingestion_service.ingest_papers(request.paper_ids)
+    return PaperIngestResponse(count=len(papers), papers=papers)
