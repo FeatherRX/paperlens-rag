@@ -1,4 +1,6 @@
 import type {
+  PaperIngestRequest,
+  PaperIngestResponse,
   PaperPrepareResponse,
   PaperSearchResponse,
 } from '../../entities/paper/model'
@@ -15,5 +17,14 @@ export function preparePapers(
   return requestJson<PaperPrepareResponse>('/papers/prepare', {
     method: 'POST',
     body: JSON.stringify({ paper_ids: paperIds }),
+  })
+}
+
+export function ingestPapers(
+  request: PaperIngestRequest,
+): Promise<PaperIngestResponse> {
+  return requestJson<PaperIngestResponse>('/papers/ingest', {
+    method: 'POST',
+    body: JSON.stringify(request),
   })
 }

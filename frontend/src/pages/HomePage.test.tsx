@@ -3,7 +3,10 @@ import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
+  IngestedPaperSummary,
+  IngestStatus,
   Paper,
+  PaperIngestResponse,
   PaperPrepareResponse,
   PaperSearchResponse,
   SourceStatus,
@@ -57,6 +60,33 @@ function preparedPaper(paper: Paper, sourceStatus: SourceStatus) {
   }
 }
 
+function ingestedPaper(
+  paper: Paper,
+  status: IngestStatus,
+  overrides: Partial<IngestedPaperSummary> = {},
+): IngestedPaperSummary {
+  const sourceType =
+    status === 'ingested'
+      ? 'grobid_xml'
+      : status === 'cached'
+        ? 'pdf'
+        : status === 'abstract_fallback'
+          ? 'abstract'
+          : null
+  return {
+    paper_id: paper.id?.split('/').at(-1) ?? '',
+    title: paper.title,
+    status,
+    source_type: sourceType,
+    license: sourceType && sourceType !== 'abstract' ? 'cc-by' : null,
+    segment_count: sourceType ? 2 : 0,
+    character_count: sourceType ? 240 : 0,
+    from_cache: status === 'cached',
+    message: `Result: ${status}`,
+    ...overrides,
+  }
+}
+
 function jsonResponse(data: unknown, status = 200) {
   return Promise.resolve(
     new Response(JSON.stringify(data), {
@@ -90,6 +120,29 @@ async function runSearch(fetchMock: ReturnType<typeof vi.fn>) {
   await user.click(screen.getByRole('button', { name: '搜索论文' }))
   await screen.findByText('Test Paper 1')
   return user
+}
+
+async function prepareSelection(
+  fetchMock: ReturnType<typeof vi.fn>,
+  user: ReturnType<typeof userEvent.setup>,
+  selectedIndexes = [2, 0, 1],
+) {
+  const response: PaperPrepareResponse = {
+    count: selectedIndexes.length,
+    papers: selectedIndexes.map((index) =>
+      preparedPaper(papers[index], 'fulltext_candidate'),
+    ),
+  }
+  fetchMock.mockImplementationOnce(() => jsonResponse(response))
+  for (const index of selectedIndexes) {
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: `选择论文：Test Paper ${index + 1}`,
+      }),
+    )
+  }
+  await user.click(screen.getByRole('button', { name: '准备分析' }))
+  await screen.findByText(`已检查 ${selectedIndexes.length} 篇论文`)
 }
 
 afterEach(() => {
@@ -261,6 +314,10 @@ describe('HomePage', () => {
     expect(screen.getByText('当前仅可使用论文原始摘要。')).toBeInTheDocument()
     expect(screen.getByText('语料不可用')).toBeInTheDocument()
     expect(screen.getByText('暂时没有可分析语料。')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '确认摄取' }),
+    ).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('shows a prepare error and keeps the page usable', async () => {
@@ -287,5 +344,106 @@ describe('HomePage', () => {
       await screen.findByText('来源准备失败：来源准备服务暂时不可用'),
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '准备分析' })).toBeEnabled()
+  })
+
+  it('submits selected IDs once and renders successful ingestion statuses', async () => {
+    const response: PaperIngestResponse = {
+      count: 3,
+      papers: [
+        ingestedPaper(papers[2], 'ingested'),
+        ingestedPaper(papers[0], 'cached'),
+        ingestedPaper(papers[1], 'abstract_fallback'),
+      ],
+    }
+    let resolveIngestion!: (value: Response) => void
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    renderHome()
+    const user = await runSearch(fetchMock)
+    await prepareSelection(fetchMock, user)
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveIngestion = resolve
+        }),
+    )
+
+    const ingestButton = screen.getByRole('button', { name: '确认摄取' })
+    await user.click(ingestButton)
+
+    expect(ingestButton).toBeDisabled()
+    expect(ingestButton).toHaveTextContent('摄取中…')
+    expect(screen.getByText('已检查 3 篇论文')).toBeInTheDocument()
+    await user.click(ingestButton)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+
+    const ingestCall = fetchMock.mock.calls[2]
+    expect(ingestCall[0]).toBe('/api/papers/ingest')
+    expect(JSON.parse(ingestCall[1].body)).toEqual({
+      paper_ids: [
+        'https://openalex.org/W3',
+        'https://openalex.org/W1',
+        'https://openalex.org/W2',
+      ],
+    })
+
+    resolveIngestion(
+      new Response(JSON.stringify(response), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    expect(await screen.findByText('已处理 3 篇论文')).toBeInTheDocument()
+    expect(screen.getByText('已摄取')).toBeInTheDocument()
+    expect(screen.getByText('已使用缓存')).toBeInTheDocument()
+    expect(screen.getByText('已回退原始摘要')).toBeInTheDocument()
+    expect(screen.getByText('GROBID XML')).toBeInTheDocument()
+    expect(screen.getByText('PDF')).toBeInTheDocument()
+    expect(screen.getByText('原始摘要')).toBeInTheDocument()
+    expect(screen.getByText('是')).toBeInTheDocument()
+  })
+
+  it('renders mixed per-paper failures as results instead of a request error', async () => {
+    const response: PaperIngestResponse = {
+      count: 3,
+      papers: [
+        ingestedPaper(papers[2], 'license_review_required'),
+        ingestedPaper(papers[0], 'unavailable'),
+        ingestedPaper(papers[1], 'failed'),
+      ],
+    }
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    renderHome()
+    const user = await runSearch(fetchMock)
+    await prepareSelection(fetchMock, user)
+    fetchMock.mockImplementationOnce(() => jsonResponse(response))
+
+    await user.click(screen.getByRole('button', { name: '确认摄取' }))
+
+    expect(await screen.findByText('需要许可证复核')).toBeInTheDocument()
+    expect(screen.getByText('语料不可用')).toBeInTheDocument()
+    expect(screen.getByText('处理失败')).toBeInTheDocument()
+    expect(screen.getByText('Result: failed')).toBeInTheDocument()
+    expect(screen.queryByText(/语料摄取请求失败/)).not.toBeInTheDocument()
+  })
+
+  it('shows a request-level ingestion error without hiding prepare results', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    renderHome()
+    const user = await runSearch(fetchMock)
+    await prepareSelection(fetchMock, user)
+    fetchMock.mockImplementationOnce(() =>
+      jsonResponse({ detail: '摄取服务暂时不可用' }, 502),
+    )
+
+    await user.click(screen.getByRole('button', { name: '确认摄取' }))
+
+    expect(
+      await screen.findByText('语料摄取请求失败：摄取服务暂时不可用'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('已检查 3 篇论文')).toBeInTheDocument()
+    expect(screen.queryByText(/已处理/)).not.toBeInTheDocument()
   })
 })

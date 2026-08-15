@@ -22,9 +22,15 @@ const statusCopy: Record<SourceStatus, { label: string; description: string }> =
 
 interface PreparationResultsProps {
   data: PaperPrepareResponse
+  isIngesting: boolean
+  onIngest: () => void
 }
 
-export function PreparationResults({ data }: PreparationResultsProps) {
+export function PreparationResults({
+  data,
+  isIngesting,
+  onIngest,
+}: PreparationResultsProps) {
   return (
     <section className={styles.section} aria-labelledby="preparation-title">
       <div className={styles.heading}>
@@ -51,6 +57,15 @@ export function PreparationResults({ data }: PreparationResultsProps) {
           )
         })}
       </ol>
+      <div className={styles.action}>
+        <div>
+          <strong>确认摄取已选择论文</strong>
+          <p>将重新核验许可证，并受控获取可用正文或保存原始摘要。</p>
+        </div>
+        <button type="button" onClick={onIngest} disabled={isIngesting}>
+          {isIngesting ? '摄取中…' : '确认摄取'}
+        </button>
+      </div>
     </section>
   )
 }

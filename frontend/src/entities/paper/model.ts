@@ -44,3 +44,34 @@ export interface PaperPrepareResponse {
   count: number
   papers: PreparedPaper[]
 }
+
+export interface PaperIngestRequest {
+  paper_ids: string[]
+}
+
+export type IngestStatus =
+  | 'ingested'
+  | 'cached'
+  | 'abstract_fallback'
+  | 'license_review_required'
+  | 'unavailable'
+  | 'failed'
+
+export type IngestSourceType = 'grobid_xml' | 'pdf' | 'abstract'
+
+export interface IngestedPaperSummary {
+  paper_id: string
+  title: string | null
+  status: IngestStatus
+  source_type: IngestSourceType | null
+  license: string | null
+  segment_count: number
+  character_count: number
+  from_cache: boolean
+  message: string
+}
+
+export interface PaperIngestResponse {
+  count: number
+  papers: IngestedPaperSummary[]
+}

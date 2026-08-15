@@ -77,3 +77,36 @@ class PaperPrepareRequest(BaseModel):
 class PaperPrepareResponse(BaseModel):
     count: int
     papers: list[PreparedPaper]
+
+
+class PaperIngestRequest(PaperPrepareRequest):
+    """The ingest endpoint deliberately reuses paper selection validation."""
+
+
+IngestStatus = Literal[
+    "ingested",
+    "cached",
+    "abstract_fallback",
+    "license_review_required",
+    "unavailable",
+    "failed",
+]
+
+IngestSourceType = Literal["grobid_xml", "pdf", "abstract"]
+
+
+class IngestedPaperSummary(BaseModel):
+    paper_id: str
+    title: str | None = None
+    status: IngestStatus
+    source_type: IngestSourceType | None = None
+    license: str | None = None
+    segment_count: int = 0
+    character_count: int = 0
+    from_cache: bool = False
+    message: str
+
+
+class PaperIngestResponse(BaseModel):
+    count: int
+    papers: list[IngestedPaperSummary]
