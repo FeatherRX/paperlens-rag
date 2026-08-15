@@ -110,3 +110,32 @@ class IngestedPaperSummary(BaseModel):
 class PaperIngestResponse(BaseModel):
     count: int
     papers: list[IngestedPaperSummary]
+
+
+class RagAnswerRequest(PaperPrepareRequest):
+    query: str = Field(min_length=1)
+    top_k: int = Field(default=5, ge=1)
+
+    @field_validator("query")
+    @classmethod
+    def normalize_query(cls, query: str) -> str:
+        normalized = query.strip()
+        if not normalized:
+            raise ValueError("query must not be blank")
+        return normalized
+
+
+class RagCitation(BaseModel):
+    citation_number: int = Field(ge=1)
+    paper_id: str
+    paper_title: str | None = None
+    chunk_index: int = Field(ge=0)
+    page_numbers: list[int] = Field(default_factory=list)
+    section_title: str | None = None
+    evidence_excerpt: str = Field(min_length=1)
+    retrieval_score: float
+
+
+class RagAnswerResponse(BaseModel):
+    answer: str = Field(min_length=1)
+    citations: list[RagCitation]
