@@ -6,6 +6,7 @@ import { SearchForm } from '../features/paper-search/SearchForm'
 import { IngestionResults } from '../features/paper-selection/IngestionResults'
 import { PreparationResults } from '../features/paper-selection/PreparationResults'
 import { SelectionToolbar } from '../features/paper-selection/SelectionToolbar'
+import { RagQuestionPanel } from '../features/rag-qa/RagQuestionPanel'
 import { ingestPapers, preparePapers, searchPapers } from '../shared/api/papers'
 import { Feedback } from '../shared/ui/Feedback'
 import styles from './HomePage.module.css'
@@ -57,8 +58,8 @@ export function HomePage() {
           <p className={styles.kicker}>论文研究助手</p>
           <h1 id="page-title">从研究主题开始，找到值得深入阅读的论文</h1>
           <p className={styles.intro}>
-            检索相关论文，亲自选择 3～5 篇，再检查可用于后续分析的来源状态。
-            当前不会下载或总结全文。
+            检索相关论文，亲自选择 3～5 篇；确认后受控摄取合法可用语料，
+            再基于可追溯证据提问。
           </p>
           <SearchForm isLoading={search.isPending} onSearch={handleSearch} />
         </section>
@@ -106,9 +107,7 @@ export function HomePage() {
             <PreparationResults
               data={preparation.data}
               isIngesting={ingestion.isPending}
-              onIngest={() =>
-                ingestion.mutate({ paper_ids: [...selectedIds] })
-              }
+              onIngest={() => ingestion.mutate({ paper_ids: [...selectedIds] })}
             />
           )}
           {ingestion.isError && (
@@ -116,7 +115,12 @@ export function HomePage() {
               语料摄取请求失败：{ingestion.error.message}
             </Feedback>
           )}
-          {ingestion.isSuccess && <IngestionResults data={ingestion.data} />}
+          {ingestion.isSuccess && (
+            <>
+              <IngestionResults data={ingestion.data} />
+              <RagQuestionPanel paperIds={[...ingestion.variables.paper_ids]} />
+            </>
+          )}
         </section>
       </main>
 

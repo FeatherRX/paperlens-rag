@@ -9,6 +9,7 @@ import type {
   PaperIngestResponse,
   PaperPrepareResponse,
   PaperSearchResponse,
+  RagAnswerResponse,
   SourceStatus,
 } from '../entities/paper/model'
 import { HomePage } from './HomePage'
@@ -84,6 +85,17 @@ function ingestedPaper(
     from_cache: status === 'cached',
     message: `Result: ${status}`,
     ...overrides,
+  }
+}
+
+function successfulIngestionResponse(
+  selectedIndexes = [2, 0, 1],
+): PaperIngestResponse {
+  return {
+    count: selectedIndexes.length,
+    papers: selectedIndexes.map((index) =>
+      ingestedPaper(papers[index], 'ingested'),
+    ),
   }
 }
 
@@ -314,9 +326,7 @@ describe('HomePage', () => {
     expect(screen.getByText('当前仅可使用论文原始摘要。')).toBeInTheDocument()
     expect(screen.getByText('语料不可用')).toBeInTheDocument()
     expect(screen.getByText('暂时没有可分析语料。')).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: '确认摄取' }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认摄取' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
@@ -445,5 +455,144 @@ describe('HomePage', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('已检查 3 篇论文')).toBeInTheDocument()
     expect(screen.queryByText(/已处理/)).not.toBeInTheDocument()
+  })
+
+  it('asks against the ingested selection once and renders linked citations', async () => {
+    const ragResponse: RagAnswerResponse = {
+      answer:
+        '模型不确定且需要外部知识时应触发检索 [1]，并依据后续生成意图形成查询 [2]。',
+      citations: [
+        {
+          citation_number: 1,
+          paper_id: 'W3',
+          paper_title: 'Test Paper 3',
+          chunk_index: 4,
+          page_numbers: [3],
+          section_title: 'Methods',
+          evidence_excerpt: 'Uncertainty indicates that retrieval is needed.',
+          retrieval_score: 0.873576,
+        },
+        {
+          citation_number: 2,
+          paper_id: 'W1',
+          paper_title: 'Test Paper 1',
+          chunk_index: 2,
+          page_numbers: [],
+          section_title: null,
+          evidence_excerpt: 'Future generation intent guides the query.',
+          retrieval_score: 0.84525,
+        },
+      ],
+    }
+    let resolveAnswer!: (value: Response) => void
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    renderHome()
+    const user = await runSearch(fetchMock)
+    await prepareSelection(fetchMock, user)
+    expect(
+      screen.queryByRole('textbox', { name: '研究问题' }),
+    ).not.toBeInTheDocument()
+    fetchMock.mockImplementationOnce(() =>
+      jsonResponse(successfulIngestionResponse()),
+    )
+    await user.click(screen.getByRole('button', { name: '确认摄取' }))
+
+    expect(await screen.findByText('已处理 3 篇论文')).toBeInTheDocument()
+    const queryInput = screen.getByRole('textbox', { name: '研究问题' })
+    const askButton = screen.getByRole('button', { name: '提问' })
+    expect(askButton).toBeDisabled()
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveAnswer = resolve
+        }),
+    )
+
+    await user.type(
+      queryInput,
+      '  When should active retrieval use external information?  ',
+    )
+    await user.click(askButton)
+
+    expect(askButton).toBeDisabled()
+    expect(askButton).toHaveTextContent('生成回答中…')
+    expect(
+      screen.getByText('正在检索证据并生成回答，请稍候…'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('已检查 3 篇论文')).toBeInTheDocument()
+    expect(screen.getByText('已处理 3 篇论文')).toBeInTheDocument()
+    await user.click(askButton)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+
+    const ragCall = fetchMock.mock.calls[3]
+    expect(ragCall[0]).toBe('/api/rag/answer')
+    expect(JSON.parse(ragCall[1].body)).toEqual({
+      query: 'When should active retrieval use external information?',
+      paper_ids: [
+        'https://openalex.org/W3',
+        'https://openalex.org/W1',
+        'https://openalex.org/W2',
+      ],
+    })
+
+    resolveAnswer(
+      new Response(JSON.stringify(ragResponse), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    expect(
+      await screen.findByText(/模型不确定且需要外部知识时应触发检索/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '[1]' })).toHaveAttribute(
+      'href',
+      '#citation-1',
+    )
+    expect(screen.getByRole('link', { name: '[2]' })).toHaveAttribute(
+      'href',
+      '#citation-2',
+    )
+    expect(
+      screen.getByRole('heading', { level: 4, name: 'Test Paper 3' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('W3 · Chunk 4')).toBeInTheDocument()
+    expect(screen.getByText('第 3 页')).toBeInTheDocument()
+    expect(screen.getByText('Methods')).toBeInTheDocument()
+    expect(screen.getByText('0.8736')).toBeInTheDocument()
+    expect(
+      screen.getByText('Uncertainty indicates that retrieval is needed.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('页码未提供')).toBeInTheDocument()
+    expect(screen.getByText('章节未提供')).toBeInTheDocument()
+  })
+
+  it('shows a request-level RAG error without hiding prior workflow results', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    renderHome()
+    const user = await runSearch(fetchMock)
+    await prepareSelection(fetchMock, user)
+    fetchMock.mockImplementationOnce(() =>
+      jsonResponse(successfulIngestionResponse()),
+    )
+    await user.click(screen.getByRole('button', { name: '确认摄取' }))
+    await screen.findByText('已处理 3 篇论文')
+    fetchMock.mockImplementationOnce(() =>
+      jsonResponse({ detail: '问答服务暂时不可用' }, 502),
+    )
+
+    await user.type(
+      screen.getByRole('textbox', { name: '研究问题' }),
+      'When should retrieval happen?',
+    )
+    await user.click(screen.getByRole('button', { name: '提问' }))
+
+    expect(
+      await screen.findByText('问答请求失败：问答服务暂时不可用'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('已检查 3 篇论文')).toBeInTheDocument()
+    expect(screen.getByText('已处理 3 篇论文')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '提问' })).toBeEnabled()
   })
 })
