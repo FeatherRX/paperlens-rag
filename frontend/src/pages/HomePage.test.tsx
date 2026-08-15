@@ -436,6 +436,85 @@ describe('HomePage', () => {
     expect(screen.getByText('处理失败')).toBeInTheDocument()
     expect(screen.getByText('Result: failed')).toBeInTheDocument()
     expect(screen.queryByText(/语料摄取请求失败/)).not.toBeInTheDocument()
+    expect(screen.getByText('0 篇可用于问答')).toBeInTheDocument()
+    expect(
+      screen.getByText(/当前只有 0 篇论文形成了可检索本地文档/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '研究问题' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '提问' })).toBeDisabled()
+  })
+
+  it('filters mixed ingestion results and preserves selection order for RAG', async () => {
+    const selectedIndexes = [4, 1, 3, 0, 2]
+    const response: PaperIngestResponse = {
+      count: 5,
+      papers: [
+        ingestedPaper(papers[0], 'failed'),
+        ingestedPaper(papers[3], 'cached'),
+        ingestedPaper(papers[4], 'ingested'),
+        ingestedPaper(papers[2], 'abstract_fallback'),
+        ingestedPaper(papers[1], 'unavailable'),
+      ],
+    }
+    const ragResponse: RagAnswerResponse = {
+      answer: 'Answer grounded in the filtered corpus [1].',
+      citations: [],
+    }
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    renderHome()
+    const user = await runSearch(fetchMock)
+    await prepareSelection(fetchMock, user, selectedIndexes)
+    fetchMock.mockImplementationOnce(() => jsonResponse(response))
+
+    await user.click(screen.getByRole('button', { name: '确认摄取' }))
+
+    expect(await screen.findByText('已处理 5 篇论文')).toBeInTheDocument()
+    expect(screen.getByText('3 篇可用于问答')).toBeInTheDocument()
+    fetchMock.mockImplementationOnce(() => jsonResponse(ragResponse))
+    await user.type(
+      screen.getByRole('textbox', { name: '研究问题' }),
+      'What does the available evidence show?',
+    )
+    await user.click(screen.getByRole('button', { name: '提问' }))
+
+    await screen.findByText('Answer grounded in the filtered corpus [1].')
+    const ragCall = fetchMock.mock.calls[3]
+    expect(ragCall[0]).toBe('/api/rag/answer')
+    expect(JSON.parse(ragCall[1].body)).toEqual({
+      query: 'What does the available evidence show?',
+      paper_ids: [
+        'https://openalex.org/W5',
+        'https://openalex.org/W4',
+        'https://openalex.org/W3',
+      ],
+    })
+  })
+
+  it('blocks RAG when fewer than three ingested papers are searchable', async () => {
+    const response: PaperIngestResponse = {
+      count: 3,
+      papers: [
+        ingestedPaper(papers[2], 'ingested'),
+        ingestedPaper(papers[0], 'license_review_required'),
+        ingestedPaper(papers[1], 'cached'),
+      ],
+    }
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    renderHome()
+    const user = await runSearch(fetchMock)
+    await prepareSelection(fetchMock, user)
+    fetchMock.mockImplementationOnce(() => jsonResponse(response))
+
+    await user.click(screen.getByRole('button', { name: '确认摄取' }))
+
+    expect(await screen.findByText('已处理 3 篇论文')).toBeInTheDocument()
+    expect(screen.getByText('2 篇可用于问答')).toBeInTheDocument()
+    expect(screen.getByText(/至少需要 3 篇才能发起问答/)).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '研究问题' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '提问' })).toBeDisabled()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('shows a request-level ingestion error without hiding prepare results', async () => {
