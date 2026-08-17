@@ -2,7 +2,7 @@
 
 PaperLens RAG 是一个以“输入研究主题”为入口的论文研究助手。当前 MVP 由 FastAPI 后端与 React 前端组成：后端通过 OpenAlex 检索论文、准备统一来源状态，并对授权明确的 OpenAlex 内容执行受控获取与文本规范化；前端支持用户搜索并自行选择 3～5 篇论文。
 
-当前阶段不实现 PDF 上传、语义分块、Embedding、向量数据库、LLM 总结、引用回答或 Docker。OpenAlex 返回的 Abstract 是论文原始摘要元数据，不是系统生成的全文总结。
+当前阶段不实现 PDF 上传、语义分块、Embedding、向量数据库、LLM 总结或引用回答。OpenAlex 返回的 Abstract 是论文原始摘要元数据，不是系统生成的全文总结。
 
 前后端分离开发、同仓库维护：FastAPI 位于仓库根目录，唯一前端工程位于 `frontend/`。前端采用 React + TypeScript + Vite、React Router、TanStack Query、CSS Modules，并且只调用 FastAPI HTTP/JSON API，绝不直接访问 OpenAlex 或读取 `OPENALEX_API_KEY`。
 
@@ -12,6 +12,7 @@ PaperLens RAG 是一个以“输入研究主题”为入口的论文研究助手
 
 - Python 3.13
 - Node.js 24 与 npm 11（前端开发）
+- Docker Engine 与 Docker Compose v2（容器化运行，可选）
 - OpenAlex API key（真实检索时使用，可在 OpenAlex 设置页免费获取）
 
 ## 创建并激活虚拟环境
@@ -75,6 +76,35 @@ D:\Node\npm.cmd run dev
 默认访问 `http://127.0.0.1:5173/`。开发服务器把所有 `/api` 请求代理到本地 FastAPI（默认 `http://127.0.0.1:8000`），并在转发时移除 `/api` 前缀。因此需要同时运行后端与前端；前端不会直接访问 OpenAlex，也不需要任何 API Key。
 
 页面流程为：输入研究主题并搜索，用户自行勾选 3～5 篇论文，然后点击“准备分析”。准备结果当前只说明开放全文候选、仅原始摘要或暂无可用语料；不会下载、解析或总结全文。
+
+## 使用 Docker Compose 启动
+
+先按“配置 OpenAlex”一节从 `.env.example` 创建本地 `.env`。Docker Compose 只在启动后端容器时读取该文件并注入环境变量；`.env` 不会复制到任何镜像，也不会提交到 Git。
+
+在仓库根目录构建并启动前后端：
+
+```powershell
+docker compose up --build -d
+```
+
+启动后访问 `http://127.0.0.1:8080/`。浏览器始终请求同源 `/api`；前端 Nginx 将该前缀反向代理到 Compose 内部的 `backend:8000`，并在转发时移除 `/api`。后端端口不直接发布到宿主机。
+
+摄取结果保存在 Docker 命名卷 `ingested_data` 中。FastEmbed 默认把 `BAAI/bge-small-en-v1.5` 的 Hugging Face 模型文件缓存到 backend 容器的 `/tmp/fastembed_cache`，该目录映射到命名卷 `fastembed_cache`。首次 RAG 问答会下载模型；下载成功后，普通的容器重建或 `docker compose down` 会复用模型缓存，避免再次冷下载。只有明确执行 `docker compose down --volumes` 才会同时删除这两个卷。
+
+Nginx 对 `/api` 使用 10 秒连接超时、30 秒请求发送超时和 180 秒响应读取超时。较长的读取窗口用于覆盖首次模型下载、Embedding 和 Qwen 回答生成，但不会无限等待后端。
+
+检查服务与健康接口：
+
+```powershell
+docker compose ps
+Invoke-RestMethod http://127.0.0.1:8080/api/health
+```
+
+停止服务：
+
+```powershell
+docker compose down
+```
 
 ## 搜索论文
 
