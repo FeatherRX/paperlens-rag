@@ -2,8 +2,12 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from app.answer import AnswerService
-from app.chunking import ChunkingService
-from app.embedding import EmbeddingService
+from app.chunking import Chunk, ChunkingService
+from app.corpus_cache import (
+    CORPUS_CACHE_DIRECTORY_NAME,
+    CorpusEmbeddingCacheStore,
+)
+from app.embedding import EmbeddedChunk, EmbeddingService
 from app.ingestion import JsonDocumentStore, NormalizedDocument
 from app.models import RagAnswerResponse, RagCitation
 from app.retrieval import RetrievalResult, RetrievalService
@@ -36,6 +40,7 @@ class RagAnswerService:
         chunking_service: ChunkingService | None = None,
         embedding_service: EmbeddingService | None = None,
         retrieval_service: RetrievalService | None = None,
+        corpus_cache: CorpusEmbeddingCacheStore | None = None,
     ) -> None:
         self._answer_service = answer_service
         self._store = store or JsonDocumentStore()
@@ -44,6 +49,14 @@ class RagAnswerService:
         self._retrieval_service = retrieval_service or RetrievalService(
             self._embedding_service
         )
+        if corpus_cache is not None:
+            self._corpus_cache = corpus_cache
+        elif isinstance(self._store, JsonDocumentStore):
+            self._corpus_cache = CorpusEmbeddingCacheStore(
+                self._store.root / CORPUS_CACHE_DIRECTORY_NAME
+            )
+        else:
+            self._corpus_cache = None
 
     def generate_answer(
         self,
@@ -56,17 +69,12 @@ class RagAnswerService:
         if missing_ids:
             raise IngestedPapersNotFoundError(missing_ids)
 
-        chunks = [
-            chunk
-            for document in documents
-            for chunk in self._chunking_service.chunk_document(document)
-        ]
-        if not chunks:
+        embedded_chunks = self._embedded_corpus(documents)
+        if not embedded_chunks:
             raise EmptyRagCorpusError(
                 "Selected papers did not contain searchable text"
             )
 
-        embedded_chunks = self._embedding_service.embed_chunks(chunks)
         evidence = self._retrieval_service.retrieve(
             query,
             embedded_chunks,
@@ -97,6 +105,58 @@ class RagAnswerService:
             else:
                 documents.append(document)
         return documents, missing_ids
+
+    def _embedded_corpus(
+        self,
+        documents: Sequence[NormalizedDocument],
+    ) -> list[EmbeddedChunk]:
+        corpus_by_document: list[list[EmbeddedChunk] | None] = []
+        pending_documents: list[
+            tuple[int, NormalizedDocument, list[Chunk]]
+        ] = []
+        chunks_to_embed: list[Chunk] = []
+
+        for document in documents:
+            cached_chunks = (
+                self._corpus_cache.load(
+                    document,
+                    chunking_config=self._chunking_service.config,
+                    embedding_config=self._embedding_service.config,
+                )
+                if self._corpus_cache is not None
+                else None
+            )
+            corpus_by_document.append(cached_chunks)
+            if cached_chunks is not None:
+                continue
+
+            document_chunks = self._chunking_service.chunk_document(document)
+            document_index = len(corpus_by_document) - 1
+            pending_documents.append(
+                (document_index, document, document_chunks)
+            )
+            chunks_to_embed.extend(document_chunks)
+
+        embedded_misses = self._embedding_service.embed_chunks(chunks_to_embed)
+        offset = 0
+        for document_index, document, document_chunks in pending_documents:
+            end = offset + len(document_chunks)
+            document_embeddings = embedded_misses[offset:end]
+            offset = end
+            corpus_by_document[document_index] = document_embeddings
+            if self._corpus_cache is not None:
+                self._corpus_cache.save(
+                    document,
+                    document_embeddings,
+                    chunking_config=self._chunking_service.config,
+                    embedding_config=self._embedding_service.config,
+                )
+
+        return [
+            chunk
+            for document_chunks in corpus_by_document
+            for chunk in (document_chunks or [])
+        ]
 
 
 def _citations(
