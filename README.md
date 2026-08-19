@@ -2,11 +2,11 @@
 
 PaperLens RAG 是一个以“输入研究主题”为入口的论文研究助手。当前 MVP 由 FastAPI 后端与 React 前端组成：后端通过 OpenAlex 检索论文、准备统一来源状态，并对授权明确的 OpenAlex 内容执行受控获取与文本规范化；前端支持用户搜索并自行选择 3～5 篇论文。
 
-当前阶段不实现 PDF 上传、语义分块、Embedding、向量数据库、LLM 总结或引用回答。OpenAlex 返回的 Abstract 是论文原始摘要元数据，不是系统生成的全文总结。
+当前不实现 PDF 上传、语义分块、独立的论文结构化总结或 Vector DB。当前 RAG 已使用 FastEmbed + ONNX Runtime 生成 embedding，以自定义 in-memory exact Top-K 完成检索，并通过 Qwen 生成带 citations 的证据约束回答；per-paper corpus embedding cache 会持久化复用已计算的语料向量。OpenAlex 返回的 Abstract 是论文原始摘要元数据，不是系统生成的全文总结。
 
 前后端分离开发、同仓库维护：FastAPI 位于仓库根目录，唯一前端工程位于 `frontend/`。前端采用 React + TypeScript + Vite、React Router、TanStack Query、CSS Modules，并且只调用 FastAPI HTTP/JSON API，绝不直接访问 OpenAlex 或读取 `OPENALEX_API_KEY`。
 
-完整且冻结的产品方向见 [`PROJECT_SPEC.md`](PROJECT_SPEC.md)。
+完整且冻结的产品方向见 [`PROJECT_SPEC.md`](PROJECT_SPEC.md)。最终实现状态见 [`CURRENT_STATE.md`](CURRENT_STATE.md)；部署运维见 [`DEPLOYMENT.md`](DEPLOYMENT.md)。
 
 ## 环境要求
 
@@ -75,7 +75,7 @@ D:\Node\npm.cmd run dev
 
 默认访问 `http://127.0.0.1:5173/`。开发服务器把所有 `/api` 请求代理到本地 FastAPI（默认 `http://127.0.0.1:8000`），并在转发时移除 `/api` 前缀。因此需要同时运行后端与前端；前端不会直接访问 OpenAlex，也不需要任何 API Key。
 
-页面流程为：输入研究主题并搜索，用户自行勾选 3～5 篇论文，然后点击“准备分析”。准备结果当前只说明开放全文候选、仅原始摘要或暂无可用语料；不会下载、解析或总结全文。
+页面流程为：输入研究主题并搜索，用户自行勾选 3～5 篇论文，先准备并审阅来源状态，再明确确认摄取，最后基于实际已形成本地语料的论文发起 RAG 问答。`/papers/prepare` 只检查候选来源，不会下载或解析全文；受控下载和解析只发生在用户确认后的 `/papers/ingest`。系统不会把原始 Abstract 冒充全文总结。
 
 ## 使用 Docker Compose 启动
 
@@ -207,7 +207,17 @@ Invoke-RestMethod `
 
 响应只包含 `paper_id`、标题、处理状态、来源类型、许可证、段落数、字符数、缓存标记和安全消息，不返回整篇全文。状态包括 `ingested`、`cached`、`abstract_fallback`、`license_review_required`、`unavailable` 和 `failed`。
 
-`/papers/prepare` 仍然只检查候选来源；只有 `/papers/ingest` 才执行上述受控获取与解析。本阶段仅按 TEI 段落或 PDF 页保存来源定位，不进行语义分块、Embedding、向量检索、LLM 总结或带引用回答。
+`/papers/prepare` 仍然只检查候选来源；只有 `/papers/ingest` 才执行上述受控获取与解析。摄取阶段仅按 TEI 段落或 PDF 页保存来源定位，不在该接口内执行 embedding、检索或回答生成；后续 RAG 问答由 `/rag/answer` 基于已经摄取的本地文档完成。
+
+## 基于已摄取论文的 RAG 问答
+
+`POST /rag/answer` 接收非空 `query`、用户当前选择且已摄取的 3～5 个 `paper_ids`，以及可选的正整数 `top_k`（默认 5）。服务只读取这些论文在 `data/ingested/` 中的 normalized documents，不会重新摄取论文或把其他文件加入 corpus。
+
+当前流水线使用固定的 structure-aware character chunking、FastEmbed 0.8.0 + ONNX Runtime 1.28.0、`BAAI/bge-small-en-v1.5` 的 384 维 L2-normalized embeddings，以及自定义 in-memory exact Top-K（normalized dot product，即 cosine similarity）。项目不使用 Qdrant、pgvector、FAISS 或其他 Vector DB。
+
+每篇论文的 corpus embeddings 以 JSON 持久化在 `data/ingested/.corpus-embeddings/`。Fingerprint、chunking signature、embedding model/dimension/pipeline signature 不匹配或缓存损坏时会自动重建；cache hit 会跳过重复的 corpus chunking 和 embedding。
+
+检索到的 evidence 会按稳定编号发送给 Qwen，响应返回 `answer` 和对应 citations；citation 包含论文、chunk、页码或章节、evidence excerpt 与 retrieval score。该回答仅代表基于检索 evidence 的综合回答，不等同于独立的论文全文结构化总结。
 
 ## 运行测试
 

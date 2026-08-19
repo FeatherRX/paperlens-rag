@@ -27,6 +27,10 @@ PaperLens 允许用户输入研究主题，系统自动检索高相关论文，�
 - 全文摄取允许的许可证至少包括 `cc-by`、`cc-by-sa`、`cc0` 和 `public-domain`；缺失、未知或不在允许列表中的许可证不得触发全文下载。
 - 全文内容请求、格式校验或解析失败后产生的 Abstract 回退必须缓存非敏感失败分类、尝试时间和 OpenAlex 来源版本；同来源版本在 6 小时内不得因重复调用再次产生内容下载费用。缺少 Key 的回退以及许可证或来源版本发生变化的记录允许重新评估。
 - 只获取摘要以及合法、明确开放获取的全文。
+- 已摄取文档使用固定的 structure-aware character chunking，并通过 FastEmbed 0.8.0、ONNX Runtime 1.28.0 和 `BAAI/bge-small-en-v1.5` 生成 384 维 L2-normalized embeddings。
+- 当前检索使用自定义 in-memory exact Top-K 和 normalized dot product，不引入 Qdrant、pgvector、FAISS 或其他 Vector DB。
+- 当前问答使用 Qwen 对检索 evidence 生成受证据约束的回答，并返回与 evidence 编号对应的 citations。
+- 每篇论文的 corpus embeddings 以 JSON 持久化在 `data/ingested/.corpus-embeddings/`，通过 normalized document fingerprint 以及 chunking/embedding signatures 控制失效和重建。
 - 保留 FastAPI 后端和自动化测试。
 - 支持使用 Docker Compose 在本地一次启动 FastAPI 后端与 React 静态前端；部署方式不得改变现有产品入口、内容授权边界或用户选择规则。
 
@@ -47,7 +51,9 @@ PaperLens 允许用户输入研究主题，系统自动检索高相关论文，�
 - 不实现简历或 JD 匹配。
 - 不把 OpenAlex 原始 Abstract 标记或展示为系统生成的全文总结。
 - 不获取付费论文或无授权全文。
-- 当前阶段不实现语义分块、LLM、Embedding、向量数据库、向量检索、自动总结或引用回答。
+- 当前不实现语义分块、Vector DB 或独立的论文结构化总结；现有实现使用固定 character chunking、本地 FastEmbed embeddings、自定义 exact retrieval，以及 Qwen 带 citations 的 RAG 回答。
+
+最终实现状态见 [`CURRENT_STATE.md`](CURRENT_STATE.md)；部署运维见 [`DEPLOYMENT.md`](DEPLOYMENT.md)。
 
 ## 产品方向变更规则
 
